@@ -1,4 +1,4 @@
-# Helm common values
+# Helm common value https://github.com/airflow-helm/charts/blob/main/charts/airflow/values.yaml
 
 serviceAccount:
   create: true
@@ -21,37 +21,21 @@ ingress:
 #       nginx.ingress.kubernetes.io/force-ssl-redirect: 'true'
 
 dags:
-  path: /usr/local/airflow/dags
-  git:
-    secret: git-secrets
-    repoHost: github.com
-    privateKeyName: id_rsa
-    gitSync:
-      enabled: true
-      image:
-        repository: registry.k8s.io/git-sync/git-sync
-        tag: v3.6.5
-        pullPolicy: IfNotPresent
-        uid: 65533
-        gid: 65533
-      repo: ""
-      repoSubPath: "dags"
-      branch: "main"
-      depth: 1
-      syncWait: 60
-      syncTimeout: 120
-      sshKeySecret: airflow-ssh-secret
-      refreshTime: 60 # In seconds
-      resources:
-        limits:
-          cpu: "50m"
-          memory: "128Mi"
-        requests:
-          cpu: "10m"
-          memory: "50Mi"
-  initContainer:
+  gitSync:
     enabled: true
-    installRequirements: false
+    repo: "git@github.com:kurkim0661/airflow-dags.git"
+    subPath: "dags"
+    rev: HEAD
+    branch: "v2-2-stable"
+    depth: 1
+    sshKeySecret: airflow-ssh-secret
+    resources:
+      limits:
+        cpu: "50m"
+        memory: "128Mi"
+      requests:
+        cpu: "10m"
+        memory: "50Mi"
 
 extraSecrets:
   airflow-ssh-secret:
@@ -113,6 +97,9 @@ airflow:
     # Scheduler
     AIRFLOW__SCHEDULER__DAG_DIR_LIST_INTERVAL: "30"
 
+    # Triggerer
+    AIRFLOW__TRIGGERER__DEFAULT_CAPACITY: "1000"
+
     # Celery
     AIRFLOW__CELERY__WORKER_CONCURRENCY: "30"
   pools:
@@ -141,6 +128,17 @@ scheduler:
       memory: "128Mi"
   securityContext:
     fsGroup: 65534
+    privileged: true
+
+  affinity:
+    nodeAffinity:
+      requiredDuringSchedulingIgnoredDuringExecution:
+        nodeSelectorTerms:
+        - matchExpressions:
+          - key: kubernetes.io/hostname
+            operator: In
+            values:
+            - airflow-demo
 
 web:
   initialDelaySeconds: '240'
@@ -153,6 +151,17 @@ web:
       memory: "512Mi"
   securityContext:
     fsGroup: 65534
+    privileged: true
+
+  affinity:
+    nodeAffinity:
+      requiredDuringSchedulingIgnoredDuringExecution:
+        nodeSelectorTerms:
+        - matchExpressions:
+          - key: kubernetes.io/hostname
+            operator: In
+            values:
+            - airflow-demo
 
 workers:
   replicas: 1
@@ -163,9 +172,6 @@ workers:
     requests:
       cpu: "1000m"
       memory: "1Gi"
-  logCleanup:
-    enabled: true
-    retentionMinutes: 21600
 
   keda:
     enabled: true
@@ -190,25 +196,38 @@ workers:
               - type: Percent
                 value: 100
                 periodSeconds: 15
-      
-  autoscaling:
+        # Query to use for KEDA autoscaling. Must return a single integer.
+
+  persistence:
+    # Enable persistent volumes
     enabled: true
-    maxReplicas: 4
-    metrics:
-      - type: Resource
-        resource:
-          name: cpu
-          target:
-            type: Utilization
-            averageUtilization: 75
-      - type: Resource
-        resource:
-          name: memory
-          target:
-            type: Utilization
-            averageUtilization: 80
+    # Volume size for worker StatefulSet
+    size: 1Gi
+    # If using a custom storageClass, pass name ref to all statefulSets here
+    storageClassName:
+    # Execute init container to chown log directory.
+    # This is currently only needed in kind, due to usage
+    # of local-path provisioner.
+    fixPermissions: false
+    # Annotations to add to worker volumes
+    annotations: {}
+    # Detailed default security context for persistence for container level
+    securityContexts:
+      privileged: true
+      container: {}
+
+  affinity:
+    nodeAffinity:
+      requiredDuringSchedulingIgnoredDuringExecution:
+        nodeSelectorTerms:
+        - matchExpressions:
+          - key: kubernetes.io/hostname
+            operator: In
+            values:
+            - airflow-demo-m02
   securityContext:
     fsGroup: 65534
+    privileged: true
 
 ###################################
 ## COMPONENT | Triggerer
@@ -223,10 +242,30 @@ triggerer:
   ## resource requests/limits for the triggerer Pods
   ## [SPEC] https://kubernetes.io/docs/reference/generated/kubernetes-api/v1.20/#resourcerequirements-v1-core
   resources: {}
-
+  persistence:
+    # Enable persistent volumes
+    enabled: true
+    # Volume size for triggerer StatefulSet
+    size: 10Gi
+    # If using a custom storageClass, pass name ref to all statefulSets here
+    storageClassName:
+    # Execute init container to chown log directory.
+    # This is currently only needed in kind, due to usage
+    # of local-path provisioner.
+    fixPermissions: false
+    # Annotations to add to triggerer volumes
+    annotations: {}
   ## maximum number of triggers each triggerer will run at once (sets `AIRFLOW__TRIGGERER__DEFAULT_CAPACITY`)
-  capacity: 1000
-
+  # capacity: 1000
+  affinity:
+    nodeAffinity:
+      requiredDuringSchedulingIgnoredDuringExecution:
+        nodeSelectorTerms:
+        - matchExpressions:
+          - key: kubernetes.io/hostname
+            operator: In
+            values:
+            - airflow-demo-m03
 
 ###################################
 ## COMPONENT | Flower
@@ -235,9 +274,6 @@ flower:
   ## if the airflow flower UI should be deployed
   enabled: true
 
-  ## the number of flower Pods to run
-  replicas: 1
-
   ## resource requests/limits for the flower Pod
   ## [SPEC] https://kubernetes.io/docs/reference/generated/kubernetes-api/v1.20/#resourcerequirements-v1-core
   resources: {}
@@ -245,20 +281,36 @@ flower:
   ## configs for the Service of the flower Pods
   service:
     type: ClusterIP
-    externalPort: 5555
+    ports:
+    ports:
+      - name: flower-ui
+        port: "{{ .Values.ports.flowerUI }}"
 
+  affinity:
+    nodeAffinity:
+      requiredDuringSchedulingIgnoredDuringExecution:
+        nodeSelectorTerms:
+        - matchExpressions:
+          - key: kubernetes.io/hostname
+            operator: In
+            values:
+            - airflow-demo-m03
 
 ###################################
 ## CONFIG | Airflow Logs
 ###################################
 logs:
-  ## the airflow logs folder
-  path: /opt/airflow/logs
-
-  ## configs for the logs PVC
-  ## [FAQ] https://github.com/airflow-helm/charts/blob/main/charts/airflow/docs/faq/monitoring/log-persistence.md
   persistence:
+    # Enable persistent volume for storing logs
     enabled: false
+    # Volume size for logs
+    size: 10Gi
+    # Annotations for the logs PVC
+    annotations: {}
+    # If using a custom storageClass, pass name here
+    storageClassName:
+    ## the name of an existing PVC to use
+    existingClaim:
 
 ###################################
 ## DATABASE | PgBouncer
@@ -267,13 +319,32 @@ pgbouncer:
   ## if the pgbouncer Deployment is created
   ## [FAQ] https://github.com/airflow-helm/charts/blob/main/charts/airflow/docs/faq/database/pgbouncer.md
   enabled: true
-
+  replicas: 1
+  # Max number of old replicasets to retain
+  revisionHistoryLimit: ~
+  # Command to use for PgBouncer(templated).
+  command: ["pgbouncer", "-u", "nobody", "/etc/pgbouncer/pgbouncer.ini"]
+  # Args to use for PgBouncer(templated).
+  args: ~
+  
   ## resource requests/limits for the pgbouncer Pods
   ## [SPEC] https://kubernetes.io/docs/reference/generated/kubernetes-api/v1.20/#resourcerequirements-v1-core
   resources: {}
 
   ## sets pgbouncer config: `auth_type`
-  authType: md5
+  auth_type: md5
+  auth_file: /etc/pgbouncer/users.txt
+
+
+  affinity:
+    nodeAffinity:
+      requiredDuringSchedulingIgnoredDuringExecution:
+        nodeSelectorTerms:
+        - matchExpressions:
+          - key: kubernetes.io/hostname
+            operator: In
+            values:
+            - airflow-demo-m03
 
 ###################################
 ## DATABASE | Embedded Postgres
@@ -291,6 +362,16 @@ postgresql:
     storageClass: ""
     size: 8Gi
 
+  affinity:
+    nodeAffinity:
+      requiredDuringSchedulingIgnoredDuringExecution:
+        nodeSelectorTerms:
+        - matchExpressions:
+          - key: kubernetes.io/hostname
+            operator: In
+            values:
+            - airflow-demo-m03
+
 ###################################
 ## DATABASE | External Database
 ###################################
@@ -307,35 +388,41 @@ redis:
   ## [FAQ] https://github.com/airflow-helm/charts/blob/main/charts/airflow/docs/faq/database/embedded-redis.md
   ## [WARNING] consider using an external database with `externalDatabase.*`
   enabled: true
+  terminationGracePeriodSeconds: 600
 
-  ## configs for redis cluster mode
-  cluster:
-    enabled: false
-    slaveCount: 1
+  # Create ServiceAccount
+  serviceAccount:
+    # default value is true
+    # ref: https://kubernetes.io/docs/tasks/configure-pod-container/configure-service-account/
+    automountServiceAccountToken: true
+    # Specifies whether a ServiceAccount should be created
+    create: true
+    # The name of the ServiceAccount to use.
+    # If not set and create is true, a name is generated using the release name
+    name: ~
 
-  ## configs for the redis master StatefulSet
-  master:
-    ## resource requests/limits for the redis master Pods
-    ## [SPEC] https://kubernetes.io/docs/reference/generated/kubernetes-api/v1.20/#resourcerequirements-v1-core
-    resources: {}
+    # Annotations to add to worker kubernetes service account.
+    annotations: {}
 
-    ## configs for the PVC of the redis master Pods
-    persistence:
-      enabled: false
-      storageClass: ""
-      size: 8Gi
+  persistence:
+    # Enable persistent volumes
+    enabled: true
+    # Volume size for worker StatefulSet
+    size: 10Gi
+    # If using a custom storageClass, pass name ref to all statefulSets here
+    storageClassName:
+    # Annotations to add to redis volumes
+    annotations: {}
 
-  ## configs for the redis slave StatefulSet
-  slave:
-    ## resource requests/limits for the slave Pods
-    ## [SPEC] https://kubernetes.io/docs/reference/generated/kubernetes-api/v1.20/#resourcerequirements-v1-core
-    resources: {}
-
-    ## configs for the PVC of the redis slave Pods
-    persistence:
-      enabled: false
-      storageClass: ""
-      size: 8Gi
+  affinity:
+    nodeAffinity:
+      requiredDuringSchedulingIgnoredDuringExecution:
+        nodeSelectorTerms:
+        - matchExpressions:
+          - key: kubernetes.io/hostname
+            operator: In
+            values:
+            - airflow-demo
 
 ###################################
 ## DATABASE | External Redis
@@ -344,6 +431,18 @@ externalRedis:
   ## the host of the external redis
   ## [FAQ] https://github.com/airflow-helm/charts/blob/main/charts/airflow/docs/faq/database/external-redis.md
   host: localhost
+
+# All ports used by chart
+ports:
+  flowerUI: 5555
+  airflowUI: 8080
+  workerLogs: 8793
+  triggererLogs: 8794
+  redisDB: 6379
+  statsdIngest: 9125
+  statsdScrape: 9102
+  pgbouncer: 6543
+  pgbouncerScrape: 9127
 
 createUserJob:
   useHelmHooks: false

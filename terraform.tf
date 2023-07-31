@@ -17,13 +17,13 @@
 
 provider "kubernetes" {
   config_path    = "~/.kube/config"
-  config_context = "minikube"
+  config_context = "airflow-demo"
 }
 
 provider "helm" {
   kubernetes {
     config_path = "~/.kube/config"
-    config_context = "minikube"
+    config_context = "airflow-demo"
     # host                   = "localhost:63210"
     # token                  = data.aws_eks_cluster_auth.this.token
     # cluster_ca_certificate = base64decode(module.eks.cluster_certificate_authority_data)
