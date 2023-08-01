@@ -1,1 +1,1 @@
-{"Modules":[{"Key":"","Source":"","Dir":"."},{"Key":"airflow","Source":"./modules/k8s/argocd","Dir":"modules/k8s/argocd"},{"Key":"argocd","Source":"./modules/k8s/argocd","Dir":"modules/k8s/argocd"}]}
+{"Modules":[{"Key":"","Source":"","Dir":"."},{"Key":"airflow","Source":"./modules/k8s/airflow","Dir":"modules/k8s/airflow"},{"Key":"argocd","Source":"./modules/k8s/argocd","Dir":"modules/k8s/argocd"},{"Key":"keda","Source":"./modules/k8s/keda","Dir":"modules/k8s/keda"}]}
